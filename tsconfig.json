@@ -1,0 +1,43 @@
+{
+	"compileOnSave": false,
+	"compilerOptions": {
+		"target": "es5",
+		"emitDecoratorMetadata": true,
+		"experimentalDecorators": true,
+		"removeComments": false,
+		"noImplicitAny": false,
+		"declaration": true,
+		"module": "commonjs",
+		"sourceMap": true,
+		"moduleResolution": "node",
+		"outDir": "dist",
+		"noStrictGenericChecks": true,
+		"preserveConstEnums": true,
+		"lib": [
+			"es2016",
+			"dom"
+		],
+		"baseUrl": "./",
+		"typeRoots": [
+			"node_modules/@types",
+			"node_modules"
+		],
+		"types": [
+			"commander",
+			"node",
+			"mocha",
+			"chai",
+			"sinon"
+		]
+	},
+	"include": [
+        "src/**/*",
+        "test/**/*"
+    ],
+    "exclude": [
+        "node_modules/**/*",
+        "bin/**/*",
+        "src/**/*.spec.ts",
+		"test/**/*.spec.ts"
+    ]
+}

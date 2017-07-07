@@ -1,0 +1,50 @@
+{
+	"name": "tsfs",
+	"version": "0.0.1",
+	"description": "",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/raphael_volt/tsfs.git"
+	},
+	"license": "MIT",
+	"scripts": {
+		"clean": "rimraf dist",
+		"build": "npm run clean && tsc --pretty",
+		"test": "npm run build && mocha --compilers ts:ts-node/register --recursive test/**/*.spec.ts",
+		"watch:build": "nodemon --config nodemon.json --exec npm run build",
+		"watch:test": "nodemon --config nodemon.json --exec npm run test"
+	},
+	"author": {
+		"name": "raphael_volt",
+		"email": "raphael.ketmie@gmail.com"
+	},
+	"main": "dist/tsfs.js",
+	"typings": "dist/tsfs.d.ts",
+	"files": [
+		"dist"
+	],
+	"devDependencies": {
+		"@types/chai": "^4.0.1",
+		"@types/commander": "^2.9.1",
+		"@types/mocha": "^2.2.39",
+		"@types/mustache": "^0.8.29",
+		"@types/node": "^7.0.33",
+		"@types/sinon": "^2.3.0",
+		"chai": "^4.0.2",
+		"commander": "^2.11.0",
+		"mocha": "^3.4.2",
+		"nodemon": "^1.11.0",
+		"rimraf": "^2.6.1",
+		"sinon": "^2.3.6"
+	},
+	"dependencies": {
+		"core-js": "^2.4.1",
+		"fs": "0.0.1-security",
+		"mustache": "^2.3.0",
+		"node": "0.0.0",
+		"path": "^0.12.7",
+		"rxjs": "^5.4.1",
+		"ts-node": "^3.1.0",
+		"typescript": "^2.4.1"
+	}
+}
