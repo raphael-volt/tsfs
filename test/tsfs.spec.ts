@@ -129,6 +129,7 @@ describe('FileSystem', () => {
                     })
                 sub.unsubscribe()
                 expectToBe(complete).true
+                tsfs.treeToString(tree)
             })
             it("should create the html tree", () => {
                 let root: TreeItem = tsfs.hierarchicalTree(tree)

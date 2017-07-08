@@ -1,8 +1,10 @@
-import {Observable, Observer, Subscription} from "rxjs";
+import { Observable, Observer, Subscription } from "rxjs";
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from "os"
 import * as mustache from "mustache"
+import * as colors from "colors"
+
 const isWin: boolean = process.platform == "win32"
 const pathSeparator: RegExp = isWin ? /\\/ : /\//
 
@@ -45,13 +47,16 @@ class SubscibeHelper {
     }
 }
 
-
 export class FileStats {
     constructor(
         public path: string = undefined,
         public basename: string = undefined,
         public stats: fs.Stats = undefined) {
     }
+    isDir: boolean
+    isFile: boolean
+    isLink: boolean
+    link: string
 }
 
 export class FileStatsTree {
@@ -63,7 +68,9 @@ export class TreeItem {
         public depth: number,
         public stats: FileStats,
         public files: TreeItem[] = [],
-        public dirs: TreeItem[] = []) {}
+        public dirs: TreeItem[] = [],
+        public parent: TreeItem = null) { }
+
 }
 
 export class tsfs {
@@ -84,8 +91,32 @@ export class tsfs {
                 if (err)
                     return observer.error(err)
                 result.stats = stats
-                observer.next(result)
-                observer.complete()
+                if (stats.isSymbolicLink()) {
+                    fs.readlink(filename, (error: NodeJS.ErrnoException, link: string) => {
+                        if (error)
+                            return observer.error(error)
+                        fs.lstat(link, (error: NodeJS.ErrnoException, linkStat: fs.Stats) => {
+                            if (error)
+                                return observer.error(error)
+                            if (linkStat.isSymbolicLink()) {
+                                return observer.error(new Error("Recursive symbolic link"))
+                            }
+                            result.isFile = linkStat.isFile()
+                            result.isDir = linkStat.isDirectory()
+                            result.link = link
+                            result.isLink = true
+                            observer.next(result)
+                            observer.complete()
+                        })
+
+                    })
+                }
+                else {
+                    result.isDir = stats.isDirectory()
+                    result.isFile = stats.isFile()
+                    observer.next(result)
+                    observer.complete()
+                }
             })
         })
     }
@@ -176,10 +207,10 @@ export class tsfs {
                 sub.error,
                 () => {
                     let next = (error?: NodeJS.ErrnoException) => {
-                        if(error)
+                        if (error)
                             return sub.error(error)
-                        
-                        if(files.length)
+
+                        if (files.length)
                             fs.unlink(files.shift(), next)
                         else {
                             sub.unsubscribe()
@@ -192,6 +223,7 @@ export class tsfs {
             )
         })
     }
+
     static generateTsIndex(dirname): Observable<boolean> {
 
         return Observable.create((observer: Observer<boolean>) => {
@@ -214,10 +246,10 @@ export class tsfs {
                 sub.error,
                 () => {
                     sub.unsubscribe()
-                    let indexMap: {dir: string, imports: string[]}[] = []
-                    let item: {dir: string, imports: string[]}
+                    let indexMap: { dir: string, imports: string[] }[] = []
+                    let item: { dir: string, imports: string[] }
                     for (let dir in map) {
-                        item = {dir: dir, imports: []}
+                        item = { dir: dir, imports: [] }
                         for (let stats of map[dir]) {
                             item.imports.push(stats.basename.slice(0, -3))
                         }
@@ -274,6 +306,7 @@ export class tsfs {
 
         let d: number = depthMap[0]
         let root = new TreeItem(d, stats)
+        let itemParent: TreeItem
 
         let nextDepth = (parent: TreeItem) => {
 
@@ -286,7 +319,8 @@ export class tsfs {
                     continue
                 }
                 let item: TreeItem = new TreeItem(depth, child)
-                if (child.stats.isDirectory()) {
+                item.parent = parent
+                if (child.isDir) {
                     parent.dirs.push(item)
                     nextDepth(item)
                 } else {
@@ -341,7 +375,7 @@ export class tsfs {
                 (fileStats: FileStats[]) => {
                     tree[depth] = tree[depth].concat(fileStats)
                     for (let stats of fileStats)
-                        if (stats.stats.isDirectory()) {
+                        if (stats.isDir && ! stats.isLink) {
                             dirs.push(stats)
                         }
                 },
@@ -369,7 +403,7 @@ export class tsfs {
             let stats: FileStats = dirs.shift()
             sub.add = tsfs.findAsync(stats.path).subscribe(
                 (fileStats: FileStats) => {
-                    const isDir: boolean = fileStats.stats.isDirectory()
+                    const isDir: boolean = fileStats.isDir
                     if (fileOnly) {
                         if (!isDir)
                             observer.next(fileStats)
@@ -393,16 +427,13 @@ export class tsfs {
     static tree(dirname: string): Observable<FileStatsTree> {
         return Observable.create((observer: Observer<FileStatsTree>) => {
 
-            const tree: FileStatsTree = new FileStatsTree()
             if (!fs.existsSync(dirname))
                 return observer.error(new Error("File does not exists"))
+            const tree: FileStatsTree = new FileStatsTree()
 
-            const root: FileStats = new FileStats(
-                dirname,
-                path.basename(dirname),
-                fs.statSync(dirname))
-            if (!root.stats.isDirectory())
-                return observer.error(new Error("File must be a directory"))
+            const root: FileStats = tsfs._statSync(dirname)
+            if (!root.isDir)
+                return observer.error(new Error("File must be a directory : " + dirname))
 
             let depth: number = tsfs.dirDepth(root.path) - 1
             tree[depth] = [root]
@@ -415,10 +446,15 @@ export class tsfs {
                         depth = tsfs.dirDepth(stats.path)
                         if (tree[depth] == undefined)
                             tree[depth] = []
-                        let files: FileStats[] = tsfs.readDir(stats.path)
+                        let files: FileStats[]
+                        try {
+                            files = tsfs.readDir(stats.path)
+                        } catch (error) {
+                            return observer.error(error)
+                        }
                         for (let f of files) {
                             tree[depth].push(f)
-                            if (f.stats.isDirectory()) {
+                            if (f.isDir && ! f.isLink) {
                                 dirs.push(f)
                             }
                         }
@@ -432,9 +468,23 @@ export class tsfs {
                     observer.complete()
                 }
             }
-
             next()
         })
+    }
+
+    private static _statSync(filename, basename?:string): FileStats {
+        if(! basename)
+            basename = path.basename(filename)
+        let s: fs.Stats = fs.lstatSync(filename)
+        let fileStats: FileStats = new FileStats(filename, basename, s)
+        if (s.isSymbolicLink()) {
+            fileStats.isLink = true
+            fileStats.link = fs.readlinkSync(filename)
+            s = fs.statSync(fileStats.link)
+        }
+        fileStats.isDir = s.isDirectory()
+        fileStats.isFile = s.isFile()
+        return fileStats
     }
 
     static readDir(dirname: string): FileStats[] {
@@ -442,14 +492,17 @@ export class tsfs {
         const files: string[] = fs.readdirSync(dirname)
         let stats: FileStats
         let p: string
+        let s: fs.Stats
+        let fileStats: FileStats
         for (const f of files) {
             p = path.join(dirname, f)
-            result.push(new FileStats(p, f, fs.lstatSync(p)))
+            fileStats = tsfs._statSync(p, f)
+            result.push(fileStats)
         }
         return result
     }
 
-    static rm_rfAsync(dirname): Observable<boolean> { 
+    static rm_rfAsync(dirname): Observable<boolean> {
         return Observable.create((observer: Observer<boolean>) => {
             let sub: SubscibeHelper = new SubscibeHelper()
             sub.observer = observer
@@ -470,6 +523,7 @@ export class tsfs {
                 sub.error)
         })
     }
+
     static rm_rf(dirname): Observable<boolean> {
         return Observable.create((observer: Observer<boolean>) => {
             tsfs.tree(dirname).subscribe(
@@ -501,16 +555,16 @@ export class tsfs {
             }
             files.reverse()
             let next = (error?: NodeJS.ErrnoException) => {
-                if(error) {
+                if (error) {
                     observer.error(error)
                     return
                 }
-                if(files.length) {
+                if (files.length) {
                     const file: FileStats = files.shift()
-                    if(file.stats.isSymbolicLink() || file.stats.isFile()) {
+                    if (file.isLink || file.isFile) {
                         fs.unlink(file.path, next)
                     }
-                    else if(file.stats.isDirectory())
+                    else if (file.isDir)
                         fs.rmdir(file.path, next)
                 }
                 else {
@@ -521,6 +575,7 @@ export class tsfs {
             next()
         })
     }
+
     static rmTree(tree: FileStatsTree): Observable<boolean> {
         return Observable.create((observer: Observer<boolean>) => {
             try {
@@ -533,9 +588,9 @@ export class tsfs {
                 }
                 files.reverse()
                 for (let f of files) {
-                    if (f.stats.isSymbolicLink() || f.stats.isFile())
+                    if (f.isLink || f.isFile)
                         fs.unlinkSync(f.path)
-                    else if (f.stats.isDirectory())
+                    else if (f.isDir)
                         fs.rmdirSync(f.path)
                 }
             } catch (e) {
@@ -563,7 +618,7 @@ export class tsfs {
                     let root: FileStats
                     sub.add = tsfs.statsAsync(dirname).subscribe(
                         (fileStats: FileStats) => {
-                            if (!fileStats.stats.isDirectory()) {
+                            if (!fileStats.isDir) {
                                 return sub.error(tsfs.notDirectoryError)
                             }
                             sub.unsubscribe()
@@ -578,37 +633,99 @@ export class tsfs {
     }
 
     static treeToString(tree: FileStatsTree) {
-        console.log("treeToString --")
-        let j: number = 0
-        let depth: number = 0
-        let t: string = ""
-        for (let i in tree) {
 
-            for (let f of tree[i]) {
+        let root: TreeItem = tsfs.hierarchicalTree(tree)
 
-                if (f.stats.isSymbolicLink()) {
-                    let ls = fs.lstatSync(f.path)
-                    let rls = fs.readlinkSync(f.path)
-                    console.log(t, j, f.
-                        basename, "=>", rls)
+        let asChildrenAfter = (parent: TreeItem, child: TreeItem, isDir: boolean): boolean => {
+            if (!parent)
+                return false
+            if (isDir) {
+                if (!parent.files.length) {
+                    return parent.dirs[parent.dirs.length - 1] != child
                 }
-                else console.log(t, j, f.basename)
+                return true
             }
-            t += "\t"
-            j++
+            return parent.files[parent.files.length - 1] != child
         }
-        console.log("-- treeToString")
+
+        let getIdent = (item: TreeItem): string => {
+            item = item.parent
+            if (!item)
+                return ""
+            let l: string[] = []
+            let p: TreeItem = item.parent
+            let c: TreeItem = item
+            while (p) {
+                if (p.files.length)
+                    l.unshift("│   ")
+                else
+                    if (p.dirs.indexOf(c) == p.dirs.length - 1)
+                        l.unshift("    ")
+                    else
+                        l.unshift("│   ")
+
+                c = p
+                p = p.parent
+            }
+            return l.join("")
+        }
+
+        let toString = (item: TreeItem) => {
+            let l: string[] = []
+            let name: string = item.stats.basename
+            const isDir: boolean = item.stats.isDir
+            const isLink: boolean = item.stats.isLink
+            if (isDir)
+                name = isLink ? colors.green.bold(name) : colors.blue.bold(name)
+
+            l.push(getIdent(item))
+            const childAfter: boolean = asChildrenAfter(item.parent, item, isDir)
+            if (item.parent)
+                l.push((childAfter ? "├──" : "└──"), " ", name)
+            else
+                l.push(name)
+            if (isLink)
+                l.push(" ➔ ", colors.magenta(item.stats.link))
+            lines.push(l.join(""))
+        }
+
+        let lines: string[] = []
+
+        let sortItem = (a: TreeItem, b: TreeItem): number => {
+            return a.stats.basename.localeCompare(b.stats.basename)
+        }
+        let nextDir = (item: TreeItem, depth: number, last: boolean = false) => {
+            toString(item)
+            let n: number = item.dirs.length
+            item.dirs.sort(sortItem)
+            item.files.sort(sortItem)
+            let i: number
+            last = false
+            for (i = 0; i < n; i++) {
+                if (i == n - 1)
+                    if (!item.files.length)
+                        last = true
+                nextDir(item.dirs[i], depth + 1, last)
+            }
+            n = item.files.length
+            for (i = 0; i < n; i++) {
+                toString(item.files[i])
+            }
+        }
+        nextDir(root, 0)
+        console.log(lines.join(os.EOL))
     }
 
     static toHtmlString(root: TreeItem): string {
+        
         let getT = (t: number): string => {
             let s: string = ""
             for (let i = 0; i < t; i++)
                 s += "\t"
             return s
         }
-        let html: string[] = [`<ol>`]
 
+        let html: string[] = [`<ol>`]
 
         let nextHtml = (item: TreeItem, ti: number = 0) => {
             let t: string = getT(ti)
