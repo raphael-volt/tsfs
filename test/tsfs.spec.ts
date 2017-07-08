@@ -140,6 +140,26 @@ describe('FileSystem', () => {
             it("should delete tree", () => {
                 deleteTree()
             })
+
+            it("should find chai.js in node_modules/chai folder", () => {
+                let filename: string = path.resolve(__dirname, "..", "node_modules", "chai")
+                let found: boolean = tsfs.find(filename, (item: FileStats) => {
+                    if(item.basename == "chai.js")
+                        return true
+                    return false
+                })
+                expectToBe(found).true
+            })
+
+            it("should find recursively chai.js in node_modules/chai/lib folder", () => {
+                let filename: string = path.resolve(__dirname, "..", "node_modules")
+                let found: boolean = tsfs.findRecurse(filename, (item: FileStats) => {
+                    if(item.basename == "chai.js" && path.basename(path.dirname(item.path)) == "lib")
+                        return true
+                    return false
+                })
+                expectToBe(found).true
+            })
         })
     })
     describe('ASYNC', () => {

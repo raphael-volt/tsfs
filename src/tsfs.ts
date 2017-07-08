@@ -121,6 +121,44 @@ export class tsfs {
         })
     }
 
+    /**
+     * Call validateFunc on each files until it returns true and break the loop.
+     * @param dirname string
+     * @param validateFunc (item: FileStats) => boolean
+     */
+    static find(dirname: string, validateFunc: (item: FileStats) => boolean): boolean {
+        let callbackResult: boolean = false
+        let files: FileStats[] = tsfs.readDir(dirname)
+        for (let file of files) {
+            if (validateFunc(file)) {
+                callbackResult = true
+                break
+            }
+        }
+        return callbackResult
+    }
+
+    /**
+     * Call validateFunc on each descendants files until it returns true and break the loop.
+     * @param dirname string
+     * @param validateFunc (item: FileStats) => boolean
+     */
+    static findRecurse(dirname: string, validateFunc: (item: FileStats) => boolean): boolean {
+        let callbackResult: boolean = false
+        let files: FileStats[] = tsfs.readDir(dirname)
+        for (let file of files) {
+            callbackResult = validateFunc(file)
+            if (callbackResult)
+                break
+            if (file.isDir) {
+                callbackResult = tsfs.findRecurse(file.path, validateFunc)
+                if (callbackResult)
+                    break
+            }
+        }
+        return callbackResult
+    }
+
     static findAsync(dirname: string): Observable<FileStats> {
         return Observable.create((observer: Observer<FileStats>) => {
 
@@ -375,7 +413,7 @@ export class tsfs {
                 (fileStats: FileStats[]) => {
                     tree[depth] = tree[depth].concat(fileStats)
                     for (let stats of fileStats)
-                        if (stats.isDir && ! stats.isLink) {
+                        if (stats.isDir && !stats.isLink) {
                             dirs.push(stats)
                         }
                 },
@@ -454,7 +492,7 @@ export class tsfs {
                         }
                         for (let f of files) {
                             tree[depth].push(f)
-                            if (f.isDir && ! f.isLink) {
+                            if (f.isDir && !f.isLink) {
                                 dirs.push(f)
                             }
                         }
@@ -472,15 +510,26 @@ export class tsfs {
         })
     }
 
-    private static _statSync(filename, basename?:string): FileStats {
-        if(! basename)
+    private static _statSync(filename, basename?: string): FileStats {
+        if (!basename)
             basename = path.basename(filename)
+
         let s: fs.Stats = fs.lstatSync(filename)
         let fileStats: FileStats = new FileStats(filename, basename, s)
         if (s.isSymbolicLink()) {
             fileStats.isLink = true
             fileStats.link = fs.readlinkSync(filename)
-            s = fs.statSync(fileStats.link)
+            try {
+                s = fs.lstatSync(fileStats.link)
+            } catch (error) {
+                /*
+                Error: ENOENT: no such file or directory, lstat '../mocha/bin/_mocha'
+                at Object.fs.lstatSync (fs.js:902:18)
+                */
+                fileStats.isDir = false
+                fileStats.isFile = true
+                return fileStats
+            }
         }
         fileStats.isDir = s.isDirectory()
         fileStats.isFile = s.isFile()
@@ -717,7 +766,7 @@ export class tsfs {
     }
 
     static toHtmlString(root: TreeItem): string {
-        
+
         let getT = (t: number): string => {
             let s: string = ""
             for (let i = 0; i < t; i++)
