@@ -298,19 +298,24 @@ export class tsfs {
                     let next = () => {
                         if (indexMap.length) {
                             item = indexMap.shift()
+                            const filename: string = path.join(item.dir, "index.ts")
                             fs.writeFile(
-                                path.join(item.dir, "index.ts"),
+                                filename,
                                 mustache.render(INDEX_TEMPLATE, item),
                                 (error: NodeJS.ErrnoException) => {
+                                    if(error)
+                                        return sub.error(error)
                                     next()
                                 }
                             )
                         }
                         else {
+                            console.log(colors.green("\✓ ") + colors.grey("generate index"))
                             observer.next(true)
                             observer.complete()
                         }
                     }
+                    
                     next()
                 }
             )
